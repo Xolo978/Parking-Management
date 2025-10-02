@@ -9,6 +9,9 @@ ParkingLot *init() {
   for (int i = 0; i < MAX_SLOT; i++) {
     p->slots[i].slot = -1;
   }
+  for (int i = 0; i < MAX_QUEUE; i++) {
+    p->queued[i].slot = -1;
+  }
   return p;
 }
 
@@ -21,8 +24,8 @@ void arrive(ParkingLot *p, const char *plate) {
       return;
     }
   }
-  p->queued[p->waiting].slot = -1;
   strcpy(p->queued[p->waiting].plate, plate);
+  p->queued[p->waiting].slot = p->waiting;
   p->waiting++;
 }
 
@@ -33,12 +36,15 @@ void depart(ParkingLot *p, const char *plate) {
       if (p->waiting > 0) {
         strcpy(p->slots[i].plate, p->queued[0].plate);
         p->slots[i].slot = i;
+        p->queued[i].slot = -1;
+        p->waiting--;
         return;
       }
     }
   }
   for (int i = 0; i < p->waiting; i++) {
     if (strcmp(p->queued[i].plate, plate) == 0) {
+      p->queued[i].slot = -1;
       p->waiting--;
       return;
     }

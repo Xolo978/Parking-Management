@@ -5,13 +5,15 @@
 
 int main() {
   ParkingLot *p = init();
-  if (p) {
-    printf("Filled:%d\n", p->filled);
-  }
-  init_gui(800, 800);
+  init_gui(1200, 600);
   printf("GUI Init");
-  arrive(p, "WB-01");
-  arrive(p, "WB-02");
+  int i = 1;
+  char buf[20];
+  while (i <= 12) {
+    sprintf(buf, "WB-%02d", i);
+    arrive(p, buf);
+    i++;
+  }
   while (!WindowShouldClose()) {
     if (IsKeyPressed(KEY_D))
       depart(p, "WB-01");

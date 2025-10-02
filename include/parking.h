@@ -1,8 +1,8 @@
 #ifndef PARKING_H
 #define PARKING_H
 
-#define MAX_SLOT 10
-#define MAX_QUEUE 20
+#define MAX_SLOT 20
+#define MAX_QUEUE 10
 
 typedef struct {
   char plate[10];
