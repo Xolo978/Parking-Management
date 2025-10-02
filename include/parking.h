@@ -16,9 +16,9 @@ typedef struct {
   Car queued[MAX_QUEUE];
 } ParkingLot;
 
-void arrive(ParkingLot *p, char plate);
-void depart(ParkingLot *p, char plate);
+void arrive(ParkingLot *p, const char *plate);
+void depart(ParkingLot *p, const char *plate);
 ParkingLot status(ParkingLot *p);
-void init(ParkingLot *p);
+ParkingLot *init();
 
 #endif
