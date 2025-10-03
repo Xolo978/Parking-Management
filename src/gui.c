@@ -2,16 +2,20 @@
 #include "parking.h"
 #include "queue.h"
 #include "raylib.h"
-#include "types.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <types.h>
 
 static int screenW, screenH;
 
 void init_gui(int width, int height) {
-  screenH = height;
   screenW = width;
+  screenH = height;
   InitWindow(screenW, screenH, "Parking Lot");
   SetTargetFPS(60);
+  srand(time(NULL));
 }
 
 void shut() { CloseWindow(); }
@@ -55,22 +59,16 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
         occupied = (car->slot != -1);
       }
 
-      Color c;
-      if (isQueue) {
-        c = occupied ? ORANGE : LIGHTGRAY;
-      } else {
-        c = occupied ? RED : GREEN;
-      }
+      Color c =
+          isQueue ? (occupied ? ORANGE : LIGHTGRAY) : (occupied ? RED : GREEN);
 
       Rectangle slot = {startX + i * (slotW + spacing), startY, (float)slotW,
                         (float)slotH};
-
       if (CheckCollisionPointRec(GetMousePosition(), slot)) {
         DrawRectangleRec(slot, Fade(c, 0.7f));
       } else {
         DrawRectangleRec(slot, c);
       }
-
       DrawRectangleLines((int)slot.x, (int)slot.y, (int)slot.width,
                          (int)slot.height, BLACK);
 
@@ -78,16 +76,59 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
       int textWidth = MeasureText(text, fontSize);
       int textX = (int)(slot.x + (slot.width - textWidth) / 2);
       int textY = (int)(slot.y + (slot.height - fontSize) / 2);
-
       DrawText(text, textX, textY, fontSize, BLACK);
 
-      // Right-click removal
       if (occupied && car && CheckCollisionPointRec(GetMousePosition(), slot) &&
-          IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-        if (isParking) {
-          depart(p, car->plate);
-        } else if (isQueue) {
-          dequeue(&p->queued);
+          IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && isParking) {
+        depart(p, car->plate);
+      }
+    }
+  }
+}
+
+static void draw_stats(ParkingLot *p) {
+  int panelX = 20;
+  int panelY = 20;
+  int fontSize = 20;
+
+  DrawText("=== Parking Stats ===", panelX, panelY, fontSize + 4, DARKGRAY);
+  DrawText(TextFormat("Filled Slots : %d", p->filled), panelX, panelY + 30,
+           fontSize, BLACK);
+  DrawText(TextFormat("Free Slots   : %d", MAX_SLOT - p->filled), panelX,
+           panelY + 60, fontSize, BLACK);
+  DrawText(TextFormat("Waiting Cars : %d", p->queued.curr), panelX, panelY + 90,
+           fontSize, BLACK);
+}
+
+static void handle_hotkeys(ParkingLot *p) {
+  static int counter = 100;
+
+  if (IsKeyPressed(KEY_A)) {
+    char plate[16];
+    sprintf(plate, "CAR%03d", counter++);
+    arrive(p, plate);
+  }
+
+  if (IsKeyPressed(KEY_D)) {
+    for (int i = 0; i < MAX_SLOT; i++) {
+      if (p->slots[i].slot != -1) {
+        depart(p, p->slots[i].plate);
+        break;
+      }
+    }
+  }
+
+  if (IsKeyPressed(KEY_Q)) {
+    if (!isEmpty(&p->queued)) {
+      for (int i = 0; i < MAX_SLOT; i++) {
+        if (p->slots[i].slot == -1) {
+          Car c = dequeue(&p->queued);
+          if (strcmp(c.plate, "INVALID") != 0) {
+            strcpy(p->slots[i].plate, c.plate);
+            p->slots[i].slot = i;
+            p->filled++;
+          }
+          break;
         }
       }
     }
@@ -98,12 +139,15 @@ void draw(ParkingLot *p) {
   BeginDrawing();
   ClearBackground(RAYWHITE);
 
-  int spacingY = 40;
+  draw_stats(p);
 
+  int spacingY = 150;
   draw_slot(p, p->slots, MAX_SLOT, "Parking Slots", spacingY, true, false);
 
   int queuedYStart = spacingY + ((MAX_SLOT + 4) / 5) * (60 + 10) + 50;
   draw_slot(p, &p->queued, MAX_QUEUE, "Queued Cars", queuedYStart, false, true);
+
+  handle_hotkeys(p);
 
   EndDrawing();
 }
