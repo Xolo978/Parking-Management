@@ -9,7 +9,7 @@ int main() {
   printf("GUI Init");
   int i = 1;
   char buf[20];
-  while (i <= 12) {
+  while (i <= 22) {
     sprintf(buf, "WB-%02d", i);
     arrive(p, buf);
     i++;

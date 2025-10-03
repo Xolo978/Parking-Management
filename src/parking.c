@@ -1,4 +1,6 @@
 #include <parking.h>
+#include <queue.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,8 +38,9 @@ void depart(ParkingLot *p, const char *plate) {
       if (p->waiting > 0) {
         strcpy(p->slots[i].plate, p->queued[0].plate);
         p->slots[i].slot = i;
-        p->queued[i].slot = -1;
         p->waiting--;
+        p->queued[p->waiting].slot = -1;
+        printf("\n%d\n", p->waiting);
         return;
       }
     }
