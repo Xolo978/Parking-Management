@@ -1,5 +1,4 @@
 #include "queue.h"
-#include "parking.h"
 
 bool isEmpty(Q *q) {
   if (q->rear == -1 && q->front == -1 && q->curr == 0) {
@@ -36,11 +35,17 @@ Car dequeue(Q *q) {
     return invalid;
   }
   Car car = q->arr[q->front];
+
+  q->arr[q->front].plate[0] = '\0';
+  q->arr[q->front].slot = -1;
+
   if (q->front == q->rear) {
     q->front = q->rear = -1;
+    q->curr = 0;
+    return car;
   } else {
     q->front = (q->front + 1) % MAX_QUEUE;
+    q->curr--;
   }
-  q->curr--;
   return car;
 }

@@ -9,11 +9,17 @@ int main() {
   printf("GUI Init");
   int i = 1;
   char buf[20];
-  while (i <= 22) {
+  while (i <= 21) {
     sprintf(buf, "WB-%02d", i);
     arrive(p, buf);
     i++;
   }
+  /**for (int i = 0; i < MAX_QUEUE; i++) {
+    if (p->queued.arr[i].slot != -1) {
+      printf("%s\n", p->queued.arr[i].plate);
+    }
+  }
+  **/
   while (!WindowShouldClose()) {
     if (IsKeyPressed(KEY_D))
       depart(p, "WB-01");

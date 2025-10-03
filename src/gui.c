@@ -1,6 +1,9 @@
 #include "gui.h"
 #include "parking.h"
+#include "queue.h"
 #include "raylib.h"
+#include "types.h"
+#include <string.h>
 
 static int screenW, screenH;
 
@@ -13,8 +16,8 @@ void init_gui(int width, int height) {
 
 void shut() { CloseWindow(); }
 
-static void draw_slot(ParkingLot *p, Car *slots, int count, const char *title,
-                      int yStart, bool isParking) {
+static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
+                      int yStart, bool isParking, bool isQueue) {
   int slotW = 140, slotH = 60;
   int spacing = 10;
   int fontSize = 20;
@@ -36,11 +39,31 @@ static void draw_slot(ParkingLot *p, Car *slots, int count, const char *title,
       if (idx >= count)
         break;
 
+      Car *car = NULL;
+      bool occupied = false;
+
+      if (isQueue) {
+        Q *q = (Q *)data;
+        if (idx < q->curr) {
+          int pos = (q->front + idx) % MAX_QUEUE;
+          car = &q->arr[pos];
+          occupied = (car->plate[0] != '\0');
+        }
+      } else {
+        Car *arr = (Car *)data;
+        car = &arr[idx];
+        occupied = (car->slot != -1);
+      }
+
+      Color c;
+      if (isQueue) {
+        c = occupied ? ORANGE : LIGHTGRAY;
+      } else {
+        c = occupied ? RED : GREEN;
+      }
+
       Rectangle slot = {startX + i * (slotW + spacing), startY, (float)slotW,
                         (float)slotH};
-
-      bool occupied = (slots[idx].slot != -1);
-      Color c = occupied ? RED : GREEN;
 
       if (CheckCollisionPointRec(GetMousePosition(), slot)) {
         DrawRectangleRec(slot, Fade(c, 0.7f));
@@ -51,20 +74,20 @@ static void draw_slot(ParkingLot *p, Car *slots, int count, const char *title,
       DrawRectangleLines((int)slot.x, (int)slot.y, (int)slot.width,
                          (int)slot.height, BLACK);
 
-      const char *text = occupied ? slots[idx].plate : "EMPTY";
+      const char *text = (occupied && car) ? car->plate : "EMPTY";
       int textWidth = MeasureText(text, fontSize);
       int textX = (int)(slot.x + (slot.width - textWidth) / 2);
       int textY = (int)(slot.y + (slot.height - fontSize) / 2);
 
       DrawText(text, textX, textY, fontSize, BLACK);
 
-      if (occupied && CheckCollisionPointRec(GetMousePosition(), slot) &&
+      // Right-click removal
+      if (occupied && car && CheckCollisionPointRec(GetMousePosition(), slot) &&
           IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-
         if (isParking) {
-          depart(p, slots[idx].plate);
-        } else {
-          slots[idx].slot = -1;
+          depart(p, car->plate);
+        } else if (isQueue) {
+          dequeue(&p->queued);
         }
       }
     }
@@ -77,11 +100,10 @@ void draw(ParkingLot *p) {
 
   int spacingY = 40;
 
-  draw_slot(p, p->slots, MAX_SLOT, "Parking Slots", spacingY, true);
+  draw_slot(p, p->slots, MAX_SLOT, "Parking Slots", spacingY, true, false);
 
   int queuedYStart = spacingY + ((MAX_SLOT + 4) / 5) * (60 + 10) + 50;
-
-  draw_slot(p, p->queued, MAX_QUEUE, "Queued Cars", queuedYStart, false);
+  draw_slot(p, &p->queued, MAX_QUEUE, "Queued Cars", queuedYStart, false, true);
 
   EndDrawing();
 }

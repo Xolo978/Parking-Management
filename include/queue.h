@@ -1,14 +1,8 @@
-#include "parking.h"
-#include <stdbool.h>
 #ifndef QUEUE_H
 #define QUEUE_H
 
-typedef struct Queue {
-  Car arr[MAX_QUEUE];
-  int rear;
-  int front;
-  int curr;
-} Q;
+#include "types.h"
+#include <stdbool.h>
 
 Q *build_q();
 int rear(Q *q);
