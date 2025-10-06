@@ -1,3 +1,4 @@
+#include "types.h"
 #include <parking.h>
 #include <queue.h>
 #include <stdlib.h>
@@ -5,13 +6,18 @@
 
 ParkingLot *init() {
   ParkingLot *p = (ParkingLot *)malloc(sizeof(ParkingLot));
+  if(!p)return NULL;
   p->filled = 0;
   p->waiting = 0;
   p->queued.front = p->queued.rear = -1;
   p->queued.curr = 0;
+  p->revenue = 0.0f;
+
   for (int i = 0; i < MAX_SLOT; i++) {
-    p->slots[i].slot = -1;
+    p->slots[i].slot = -1;  
+     p->slots[i].arrival = 0;
   }
+
   for (int i = 0; i < MAX_QUEUE; i++) {
     p->queued.arr[i].slot = -1;
   }
@@ -23,6 +29,8 @@ int arrive(ParkingLot *p, const char *plate) {
     if (p->slots[i].slot == -1) {
       strcpy(p->slots[i].plate, plate);
       p->slots[i].slot = i;
+      //Current time
+      p->slots[i].arrival = time(NULL);
       p->filled++;
       return 0;
     }
@@ -37,11 +45,29 @@ int arrive(ParkingLot *p, const char *plate) {
   return 2; // Full queue
 }
 
+static float calculate_duration(time_t arrival){
+  time_t now = time(NULL);
+  double seconds = difftime(now, arrival);
+  return (float)(seconds / 3600.0); //Secs to hrs
+}
+
+static float calulate_bill(time_t arrival){
+  float hours = calculate_duration(arrival);
+  if(hours<1.0f) hours = 1.0f;
+  return hours * HOURLY_RATE;
+
+}
+
 int depart(ParkingLot *p, const char *plate) {
   for (int i = 0; i < MAX_SLOT; i++) {
     if (p->slots[i].slot != -1 && strcmp(p->slots[i].plate, plate) == 0) {
+
+      float bill = calulate_bill(p->slots[i].arrival);
+      p->revenue += bill;
+
       p->slots[i].slot = -1;
       p->slots[i].plate[0] = '\0';
+      p->slots[i].arrival = 0;
       p->filled--;
 
       // Checking wait queue
@@ -50,6 +76,7 @@ int depart(ParkingLot *p, const char *plate) {
         if (strcmp(c.plate, "INVALID") != 0) {
           strcpy(p->slots[i].plate, c.plate);
           p->slots[i].slot = i;
+          p->slots[i].arrival = time(NULL);
           p->filled++;
         }
       }
@@ -58,4 +85,22 @@ int depart(ParkingLot *p, const char *plate) {
     }
   }
   return 1;
+}
+
+float park_duration(ParkingLot *p,const char *plate){
+  for(int i=0;i<MAX_SLOT;i++){
+    if(p->slots[i].slot != -1 && strcmp(p->slots[i].plate,plate)==0){
+      return calculate_duration(p->slots[i].arrival);
+    }
+  }
+  return 0.0f;
+}
+
+float current_bill(ParkingLot *p,const char *plate){
+  for(int i=0;i<MAX_SLOT;i++){
+    if(p->slots[i].slot != -1 && strcmp(p->slots[i].plate,plate)==0){
+      return calulate_bill(p->slots[i].arrival);
+    }
+  }
+  return 0.0f;
 }
