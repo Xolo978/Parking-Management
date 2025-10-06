@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #include <types.h>
 
 static int screenW, screenH;
@@ -13,6 +14,20 @@ static float hoverAnimTime[MAX_SLOT + MAX_QUEUE] = {0};
 static int hoveredSlot = -1;
 static Font customFont;
 static bool fontLoaded = false;
+
+static char searchQuery[32] = "";
+static int searchResultSlot = -1;
+static bool searchActive = false;
+
+static char plateInput[32] = "";
+static bool inputActive = false;
+
+static int autoCounter = 100;
+
+static char currentTooltip[128] = "";
+static bool showTooltip = false;
+static int tooltipX = 0;
+static int tooltipY = 0;
 
 typedef enum {
   ANIM_NONE,
@@ -40,6 +55,8 @@ typedef struct {
 
 #define MAX_NOTIFICATIONS 5
 static Notification notifications[MAX_NOTIFICATIONS] = {0};
+
+static void trigger_animation(AnimationType type, int slotIndex, const char *plate);
 
 static void add_notification(const char *message, Color color) {
   for (int i = MAX_NOTIFICATIONS - 1; i > 0; i--) {
@@ -73,7 +90,7 @@ static void draw_notifications() {
       float alpha = notifications[i].lifetime > 0.5f ? 1.0f : (notifications[i].lifetime / 0.5f);
       int yPos = startY + i * spacing;
       
-      int textWidth = MeasureText(notifications[i].message, 14);
+      int textWidth = MeasureText(notifications[i].message, 18);
       int panelW = textWidth + 20;
       
       DrawRectangle(panelX + 2, yPos + 2, panelW, 28, 
@@ -85,8 +102,223 @@ static void draw_notifications() {
       DrawRectangleLinesEx((Rectangle){panelX, yPos, panelW, 28}, 2.0f,
                           (Color){255, 255, 255, (unsigned char)(180 * alpha)});
       
-      DrawText(notifications[i].message, panelX + 10, yPos + 7, 14,
+      DrawText(notifications[i].message, panelX + 10, yPos + 7, 18,
               (Color){255, 255, 255, (unsigned char)(255 * alpha)});
+    }
+  }
+}
+
+static bool is_duplicate(ParkingLot *p, const char *plate) {
+  for (int i = 0; i < MAX_SLOT; i++) {
+    if (p->slots[i].slot != -1) {
+      if (strcmp(p->slots[i].plate, plate) == 0) {
+        return true;
+      }
+    }
+  }
+  
+  Q *q = &p->queued;
+  int count = (q->rear - q->front + MAX_QUEUE) % MAX_QUEUE;
+  if (q->curr > 0) count = q->curr;
+  
+  for (int i = 0; i < count; i++) {
+    int idx = (q->front + i) % MAX_QUEUE;
+    if (strcmp(q->arr[idx].plate, plate) == 0) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+static void search_car(ParkingLot *p, const char *query) {
+  searchResultSlot = -1;
+  
+  if (strlen(query) == 0) {
+    return;
+  }
+  
+  for (int i = 0; i < MAX_SLOT; i++) {
+    if (p->slots[i].slot != -1) {
+      if (strstr(p->slots[i].plate, query) != NULL) {
+        searchResultSlot = i;
+        return;
+      }
+    }
+  }
+  
+  for (int i = 0; i < p->queued.curr; i++) {
+    int pos = (p->queued.front + i) % MAX_QUEUE;
+    if (strstr(p->queued.arr[pos].plate, query) != NULL) {
+      searchResultSlot = MAX_SLOT + i;
+      return;
+    }
+  }
+}
+
+static void draw_search_box() {
+  int boxX = 30;
+  int boxY = 55;
+  int boxW = 250;
+  int boxH = 35;
+  
+  Rectangle searchBox = {boxX, boxY, boxW, boxH};
+  bool isHovered = CheckCollisionPointRec(GetMousePosition(), searchBox);
+  
+  DrawRectangle(boxX + 2, boxY + 2, boxW, boxH, (Color){0, 0, 0, 40});
+  
+  Color bgColor = searchActive ? (Color){255, 255, 255, 255} : (Color){248, 250, 252, 255};
+  DrawRectangle(boxX, boxY, boxW, boxH, bgColor);
+  
+  Color borderColor = searchActive ? (Color){59, 130, 246, 255} : 
+                      (isHovered ? (Color){148, 163, 184, 255} : (Color){203, 213, 225, 255});
+  DrawRectangleLinesEx(searchBox, 2.0f, borderColor);
+  
+  const char *placeholder = "Search license plate...";
+  if (strlen(searchQuery) == 0 && !searchActive) {
+    DrawText(placeholder, boxX + 10, boxY + 10, 20, (Color){148, 163, 184, 255});
+  } else {
+    DrawText(searchQuery, boxX + 10, boxY + 10, 20, (Color){30, 41, 59, 255});
+    
+    if (searchActive) {
+      int textWidth = MeasureText(searchQuery, 20);
+      int cursorX = boxX + 10 + textWidth;
+      if ((int)(GetTime() * 2) % 2 == 0) {
+        DrawRectangle(cursorX, boxY + 8, 2, 20, (Color){59, 130, 246, 255});
+      }
+    }
+  }
+  
+  DrawText("🔍", boxX + boxW - 30, boxY + 8, 20, (Color){100, 116, 139, 255});
+  
+  if (isHovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+    searchActive = true;
+    inputActive = false;
+  }
+}
+
+static void draw_input_box() {
+  int boxX = 300;
+  int boxY = 55;
+  int boxW = 220;
+  int boxH = 35;
+  
+  Rectangle inputBox = {boxX, boxY, boxW, boxH};
+  bool isHovered = CheckCollisionPointRec(GetMousePosition(), inputBox);
+  
+  DrawRectangle(boxX + 2, boxY + 2, boxW, boxH, (Color){0, 0, 0, 40});
+  
+  Color bgColor = inputActive ? (Color){255, 255, 255, 255} : (Color){248, 250, 252, 255};
+  DrawRectangle(boxX, boxY, boxW, boxH, bgColor);
+  
+  Color borderColor = inputActive ? (Color){34, 197, 94, 255} : 
+                      (isHovered ? (Color){148, 163, 184, 255} : (Color){203, 213, 225, 255});
+  DrawRectangleLinesEx(inputBox, 2.0f, borderColor);
+  
+  const char *placeholder = "Enter plate number...";
+  if (strlen(plateInput) == 0 && !inputActive) {
+    DrawText(placeholder, boxX + 10, boxY + 10, 20, (Color){148, 163, 184, 255});
+  } else {
+    DrawText(plateInput, boxX + 10, boxY + 10, 20, (Color){30, 41, 59, 255});
+    
+    if (inputActive) {
+      int textWidth = MeasureText(plateInput, 20);
+      int cursorX = boxX + 10 + textWidth;
+      if ((int)(GetTime() * 2) % 2 == 0) {
+        DrawRectangle(cursorX, boxY + 8, 2, 20, (Color){34, 197, 94, 255});
+      }
+    }
+  }
+  
+  if (isHovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+    inputActive = true;
+    searchActive = false;
+  }
+}
+
+static void draw_add_buttons(ParkingLot *p) {
+  int btnY = 55;
+  int btnH = 35;
+  int spacing = 10;
+  
+  int addX = 530;
+  int addW = 120;
+  Rectangle addBtn = {addX, btnY, addW, btnH};
+  bool addHovered = CheckCollisionPointRec(GetMousePosition(), addBtn);
+  
+  DrawRectangle(addX + 2, btnY + 2, addW, btnH, (Color){0, 0, 0, 40});
+  
+  Color addBg = addHovered ? (Color){22, 163, 74, 255} : (Color){34, 197, 94, 255};
+  DrawRectangle(addX, btnY, addW, btnH, addBg);
+  DrawRectangleLinesEx(addBtn, 2.0f, (Color){255, 255, 255, 200});
+  
+  const char *addText = "Add Car";
+  int textW = MeasureText(addText, 20);
+  DrawText(addText, addX + (addW - textW) / 2, btnY + 10, 20, WHITE);
+  
+  if (addHovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+    if (strlen(plateInput) > 0) {
+      if (is_duplicate(p, plateInput)) {
+        add_notification("Car already exists!", (Color){239, 68, 68, 255});
+      } else {
+        int result = arrive(p, plateInput);
+        
+        if (result == 0) {
+          for (int i = 0; i < MAX_SLOT; i++) {
+            if (p->slots[i].slot != -1 && strcmp(p->slots[i].plate, plateInput) == 0) {
+              trigger_animation(ANIM_ARRIVE, i, plateInput);
+              break;
+            }
+          }
+        } else if (result == 1) {
+          int qIdx = p->queued.curr - 1;
+          if (qIdx >= 0) {
+            trigger_animation(ANIM_ARRIVE, MAX_SLOT + qIdx, plateInput);
+          }
+        }
+      }
+      
+      plateInput[0] = '\0';
+    }
+  }
+  
+  int randomX = addX + addW + spacing;
+  int randomW = 140;
+  Rectangle randomBtn = {randomX, btnY, randomW, btnH};
+  bool randomHovered = CheckCollisionPointRec(GetMousePosition(), randomBtn);
+  
+  DrawRectangle(randomX + 2, btnY + 2, randomW, btnH, (Color){0, 0, 0, 40});
+  
+  Color randomBg = randomHovered ? (Color){29, 78, 216, 255} : (Color){59, 130, 246, 255};
+  DrawRectangle(randomX, btnY, randomW, btnH, randomBg);
+  DrawRectangleLinesEx(randomBtn, 2.0f, (Color){255, 255, 255, 200});
+  
+  const char *randomText = "Add Random";
+  int randomTextW = MeasureText(randomText, 20);
+  DrawText(randomText, randomX + (randomW - randomTextW) / 2, btnY + 10, 20, WHITE);
+  
+  if (randomHovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+    char plate[16];
+    sprintf(plate, "CAR%03d", autoCounter++);
+    
+    if (is_duplicate(p, plate)) {
+      add_notification("Car already exists!", (Color){239, 68, 68, 255});
+    } else {
+      int result = arrive(p, plate);
+      
+      if (result == 0) {
+        for (int i = 0; i < MAX_SLOT; i++) {
+          if (p->slots[i].slot != -1 && strcmp(p->slots[i].plate, plate) == 0) {
+            trigger_animation(ANIM_ARRIVE, i, plate);
+            break;
+          }
+        }
+      } else if (result == 1) {
+        int qIdx = p->queued.curr - 1;
+        if (qIdx >= 0) {
+          trigger_animation(ANIM_ARRIVE, MAX_SLOT + qIdx, plate);
+        }
+      }
     }
   }
 }
@@ -134,9 +366,6 @@ void init_gui(int width, int height) {
   InitWindow(screenW, screenH, "Parking Lot Management System");
   SetTargetFPS(60);
   srand(time(NULL));
-  
-  customFont = GetFontDefault();
-  fontLoaded = true;
 }
 
 void shut() { 
@@ -154,7 +383,7 @@ static Color lerp_color(Color a, Color b, float t) {
 }
 
 static void draw_tooltip(const char *text, int x, int y) {
-  int fontSize = 14;
+  int fontSize = 18;
   int padding = 8;
   int textWidth = MeasureText(text, fontSize);
   int tooltipWidth = textWidth + padding * 2;
@@ -175,7 +404,7 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
                       int yStart, bool isParking, bool isQueue) {
   int slotW = 140, slotH = 70;
   int spacing = 14;
-  int fontSize = 18;
+  int fontSize = 22;
   int maxPerRow = 5;
 
   DrawText(title, 30, yStart - fontSize - 38, fontSize + 8,
@@ -225,6 +454,8 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
       Rectangle slot = {startX + i * (slotW + spacing), startY, (float)slotW, (float)slotH};
       bool isHovered = CheckCollisionPointRec(GetMousePosition(), slot);
       int globalIdx = isParking ? idx : (MAX_SLOT + idx);
+      
+      bool isSearchResult = (searchResultSlot == globalIdx && strlen(searchQuery) > 0);
 
       if (isHovered) {
         hoverAnimTime[globalIdx] += GetFrameTime() * 6.0f;
@@ -258,6 +489,14 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
       
       Color borderColor = isHovered ? (Color){59, 130, 246, 255} : (Color){148, 163, 184, 180};
       DrawRectangleLinesEx(animSlot, 2.5f, borderColor);
+      
+      if (isSearchResult) {
+        float pulse = (sinf((float)GetTime() * 5.0f) + 1.0f) / 2.0f;
+        unsigned char alpha = (unsigned char)(100 + pulse * 100);
+        DrawRectangleLinesEx(animSlot, 4.0f, (Color){255, 215, 0, alpha});
+        DrawRectangleLinesEx((Rectangle){animSlot.x - 3, animSlot.y - 3, animSlot.width + 6, animSlot.height + 6}, 
+                            2.0f, (Color){255, 215, 0, (unsigned char)(alpha * 0.5f)});
+      }
 
       if (occupied) {
         DrawRectangleRounded(
@@ -339,7 +578,7 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
         float badgeSize = 22.0f;
         DrawCircle((int)animSlot.x + (int)(badgeSize/2) + 6, (int)animSlot.y + (int)(badgeSize/2) + 6, 
                    badgeSize/2, (Color){100, 116, 139, 120});
-        DrawText(slotNum, (int)animSlot.x + 8, (int)animSlot.y + 8, 14,
+        DrawText(slotNum, (int)animSlot.x + 8, (int)animSlot.y + 8, 18,
                  (Color){241, 245, 249, 200});
       }
 
@@ -352,7 +591,19 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
                  (int)animSlot.y + 8, 12, (Color){255, 255, 255, 200});
       }
 
-      // Right-click to depart
+
+      if (isHovered && occupied && car) {
+        showTooltip = true;
+        tooltipX = GetMouseX() + 15;
+        tooltipY = GetMouseY() + 15;
+        if (isParking) {
+          float bill = current_bill(p, car->plate);
+          snprintf(currentTooltip, sizeof(currentTooltip), "%s | Bill: $%.2f", car->plate, bill);
+        } else {
+          snprintf(currentTooltip, sizeof(currentTooltip), "%s (Waiting)", car->plate);
+        }
+      }
+
       if (occupied && car && isHovered && 
           IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && isParking) {
         char departPlate[32];
@@ -366,17 +617,6 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
         }
       }
 
-      // Tooltip on hover
-      if (isHovered && occupied && car) {
-        const char *tooltip;
-        if (isParking) {
-          float bill = current_bill(p, car->plate);
-          tooltip = TextFormat("%s | Bill: $%.2f", car->plate, bill);
-        } else {
-          tooltip = TextFormat("%s (Waiting)", car->plate);
-        }
-        draw_tooltip(tooltip, GetMouseX() + 15, GetMouseY() + 15);
-      }
     }
   }
 }
@@ -384,7 +624,7 @@ static void draw_slot(ParkingLot *p, void *data, int count, const char *title,
 static void draw_stats(ParkingLot *p) {
   int panelX = screenW - 300;
   int panelY = 70;
-  int fontSize = 18;
+  int fontSize = 22;
   int rowHeight = 40;
   int panelWidth = 280;
   int panelHeight = 300;
@@ -433,23 +673,101 @@ static void draw_stats(ParkingLot *p) {
 
 static void handle_hotkeys(ParkingLot *p) {
   static int counter = 100;
+  
+  if (searchActive || inputActive) {
+    char *activeInput = searchActive ? searchQuery : plateInput;
+    int maxLen = 31;
+    
+    int key = GetCharPressed();
+    while (key > 0) {
+      if (key >= 32 && key <= 125 && strlen(activeInput) < maxLen) {
+        int len = strlen(activeInput);
+        activeInput[len] = (char)key;
+        activeInput[len + 1] = '\0';
+      }
+      key = GetCharPressed();
+    }
+    
+    if (IsKeyPressed(KEY_BACKSPACE) && strlen(activeInput) > 0) {
+      activeInput[strlen(activeInput) - 1] = '\0';
+    }
+    
+    if (searchActive) {
+      search_car(p, searchQuery);
+    }
+    
+    if (IsKeyPressed(KEY_ENTER)) {
+      if (inputActive && strlen(plateInput) > 0) {
+        if (is_duplicate(p, plateInput)) {
+          add_notification("Car already exists!", (Color){239, 68, 68, 255});
+        } else {
+          int result = arrive(p, plateInput);
+          
+          if (result == 0) {
+            for (int i = 0; i < MAX_SLOT; i++) {
+              if (p->slots[i].slot != -1 && strcmp(p->slots[i].plate, plateInput) == 0) {
+                trigger_animation(ANIM_ARRIVE, i, plateInput);
+                break;
+              }
+            }
+          } else if (result == 1) {
+            int qIdx = p->queued.curr - 1;
+            if (qIdx >= 0) {
+              trigger_animation(ANIM_ARRIVE, MAX_SLOT + qIdx, plateInput);
+            }
+          }
+        }
+        
+        plateInput[0] = '\0';
+      }
+      inputActive = false;
+      searchActive = false;
+    }
+    
+    if (IsKeyPressed(KEY_ESCAPE)) {
+      searchActive = false;
+      inputActive = false;
+      searchQuery[0] = '\0';
+      searchResultSlot = -1;
+    }
+    
+    return;
+  }
+  
+  if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+    Vector2 mousePos = GetMousePosition();
+    Rectangle searchBox = {30, 55, 250, 35};
+    Rectangle inputBox = {300, 55, 220, 35};
+    
+    if (!CheckCollisionPointRec(mousePos, searchBox) && 
+        !CheckCollisionPointRec(mousePos, inputBox)) {
+      searchActive = false;
+      inputActive = false;
+      searchResultSlot = -1;
+    }
+  }
 
   if (IsKeyPressed(KEY_A)) {
     char plate[16];
     sprintf(plate, "CAR%03d", counter++);
-    int result = arrive(p, plate);
     
-    if (result == 0) {
-      for (int i = 0; i < MAX_SLOT; i++) {
-        if (p->slots[i].slot != -1 && strcmp(p->slots[i].plate, plate) == 0) {
-          trigger_animation(ANIM_ARRIVE, i, plate);
-          break;
+    if (is_duplicate(p, plate)) {
+      add_notification("Car already exists!", (Color){239, 68, 68, 255});
+    } else {
+      int result = arrive(p, plate);
+      
+      if (result == 0) {
+        for (int i = 0; i < MAX_SLOT; i++) {
+          if (p->slots[i].slot != -1 && strcmp(p->slots[i].plate, plate) == 0) {
+            trigger_animation(ANIM_ARRIVE, i, plate);
+            break;
+          }
         }
-      }
-    } else if (result == 1) {
-      int qIdx = p->queued.curr - 1;
-      if (qIdx >= 0) {
-        trigger_animation(ANIM_ARRIVE, MAX_SLOT + qIdx, plate);
+      } else if (result == 1) {
+        int qIdx = p->queued.curr - 1;
+        if (qIdx >= 0) {
+          trigger_animation(ANIM_ARRIVE, MAX_SLOT + qIdx, plate);
+        }
       }
     }
   }
@@ -497,6 +815,8 @@ void draw(ParkingLot *p) {
   update_animations();
   update_notifications();
   
+  showTooltip = false;
+  
   DrawRectangleGradientV(0, 0, screenW, screenH, 
                          (Color){243, 244, 246, 255},
                          (Color){229, 231, 235, 255});
@@ -506,21 +826,32 @@ void draw(ParkingLot *p) {
                          (Color){37, 99, 235, 255},
                          (Color){29, 78, 216, 255});
   
-  DrawText("Parking Lot Management System", 32, 12, 22, (Color){0, 0, 0, 80});
-  DrawText("Parking Lot Management System", 30, 10, 22, WHITE);
+  DrawText("Parking Lot Management System", 32, 12, 26, (Color){0, 0, 0, 80});
+  DrawText("Parking Lot Management System", 30, 10, 26, WHITE);
 
+  draw_search_box();
+  draw_input_box();
+  draw_add_buttons(p);
+  
   draw_notifications();
   
   draw_stats(p);
 
-  int spacingY = 120;
+  int spacingY = 160;
   draw_slot(p, p->slots, MAX_SLOT, "Parking Slots", spacingY, true, false);
 
 
-  int queuedY = spacingY + ((MAX_SLOT + 4) / 5) * (70 + 14) + 60;
+  int queuedY = spacingY + ((MAX_SLOT + 4) / 5) * (70 + 14) + 80;
   draw_slot(p, &p->queued, MAX_QUEUE, "Waiting Queue", queuedY, false, true);
 
   handle_hotkeys(p);
+  
+  if (showTooltip) {
+    draw_tooltip(currentTooltip, tooltipX, tooltipY);
+  }
+  
+  DrawText("Search: Click search box | Entry: Type & click 'Add Car' | Random: Click 'Add Random' or press A | ESC to clear", 
+           10, screenH - 20, 10, (Color){100, 116, 139, 255});
 
   EndDrawing();
 }

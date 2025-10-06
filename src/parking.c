@@ -42,20 +42,21 @@ int arrive(ParkingLot *p, const char *plate) {
     p->waiting = p->queued.curr;
     return 1;
   }
-  return 2; // Full queue
+  return 2;
 }
 
 static float calculate_duration(time_t arrival){
   time_t now = time(NULL);
   double seconds = difftime(now, arrival);
-  return (float)(seconds / 3600.0); //Secs to hrs
+  return (float)(seconds / 3600.0); 
 }
 
 static float calulate_bill(time_t arrival){
-  float hours = calculate_duration(arrival);
-  if(hours<1.0f) hours = 1.0f;
-  return hours * HOURLY_RATE;
-
+  time_t now = time(NULL);
+  double seconds = difftime(now, arrival);
+  int intervals = (int)(seconds / 30.0);
+  if (intervals < 1) intervals = 1;
+  return (float)(intervals * 10.0);
 }
 
 int depart(ParkingLot *p, const char *plate) {
@@ -70,7 +71,6 @@ int depart(ParkingLot *p, const char *plate) {
       p->slots[i].arrival = 0;
       p->filled--;
 
-      // Checking wait queue
       if (!isEmpty(&p->queued)) {
         Car c = dequeue(&p->queued);
         if (strcmp(c.plate, "INVALID") != 0) {
